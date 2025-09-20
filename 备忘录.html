@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>严星辰的备忘录</title>
+  <style>
+    :root{--bg:#d9f2e6;--card:#f1fbf6;--accent:#10b981;--muted:#4b5563;--glass:rgba(255,255,255,0.6)}
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Noto Sans,'Microsoft Yahei',sans-serif;margin:0;background:var(--bg);color:#1f2937;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .wrap{width:100%;max-width:760px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    h1{font-size:22px;margin:0;color:#065f46}
+    .card{background:var(--card);padding:18px;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,0.1);}
+    .controls{display:flex;gap:8px;align-items:center}
+    input[type=text]{flex:1;padding:10px 12px;border-radius:10px;border:1px solid #cbd5e1;background:#fff;color:inherit}
+    button{padding:10px 12px;border-radius:10px;border:0;background:linear-gradient(180deg,var(--accent),#059669);color:#fff;cursor:pointer;font-weight:600}
+    .btn-ghost{background:transparent;border:1px solid #d1d5db;color:var(--muted);padding:8px 10px}
+    .row{display:flex;gap:12px;align-items:center}
+    .filters{display:flex;gap:8px;margin:14px 0}
+    .filters button{padding:6px 10px;border-radius:8px;background:transparent;border:1px solid transparent;color:var(--muted);cursor:pointer}
+    .filters button.active{border-color:#a7f3d0;color:#065f46}
+    ul.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+    li.item{display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;background:#fff;border:1px solid #e2e8f0}
+    li.item .text{flex:1;word-break:break-word}
+    li.item.completed .text{text-decoration:line-through;color:var(--muted)}
+    .meta{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+    .small{font-size:13px;color:var(--muted)}
+    .icon-btn{background:transparent;border:0;color:var(--muted);cursor:pointer;padding:6px;border-radius:8px}
+    .count{margin-left:auto;font-size:13px;color:var(--muted)}
+    .editable{background:transparent;border:0;color:inherit;width:100%;outline:none}
+    @media (max-width:520px){header{flex-direction:column;align-items:flex-start;gap:8px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>严星辰的备忘录</h1>
+      <div class="small">支持本地保存 · 可添加/编辑/删除/勾选</div>
+    </header>
+
+    <section class="card">
+      <div class="row" style="margin-bottom:12px">
+        <input id="newInput" type="text" placeholder="写下你要做的事，按回车或点击“添加" />
+        <button id="addBtn">添加</button>
+        <button id="clearAll" class="btn-ghost">清空全部</button>
+      </div>
+
+      <div class="filters">
+        <button data-filter="all" class="active">全部</button>
+        <button data-filter="active">未完成</button>
+        <button data-filter="completed">已完成</button>
+        <button id="clearCompleted" class="btn-ghost">清除已完成</button>
+      </div>
+
+      <ul id="list" class="list" aria-live="polite"></ul>
+
+      <div style="display:flex;align-items:center;margin-top:12px">
+        <div class="small">已完成 <span id="doneCount">0</span> / 总计 <span id="totalCount">0</span></div>
+        <div class="count">Last saved: <span id="savedAt">--</span></div>
+      </div>
+    </section>
+
+    <div style="margin-top:10px;color:var(--muted);font-size:13px">提示：列表保存在你的浏览器，本页刷新仍可保留。</div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'memo-checklist-v1';
+    let items = []; // {id, text, done, createdAt}
+    const listEl = document.getElementById('list');
+    const newInput = document.getElementById('newInput');
+    const addBtn = document.getElementById('addBtn');
+    const clearAllBtn = document.getElementById('clearAll');
+    const clearCompletedBtn = document.getElementById('clearCompleted');
+    const filters = document.querySelectorAll('.filters [data-filter]');
+    const doneCountEl = document.getElementById('doneCount');
+    const totalCountEl = document.getElementById('totalCount');
+    const savedAtEl = document.getElementById('savedAt');
+
+    function save(){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      savedAtEl.textContent = new Date().toLocaleString();
+    }
+    function load(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(raw) items = JSON.parse(raw);
+      }catch(e){items = []}
+    }
+
+    let activeFilter = 'all';
+    function render(){
+      listEl.innerHTML = '';
+      const filtered = items.filter(i=>{
+        if(activeFilter==='all') return true;
+        if(activeFilter==='active') return !i.done;
+        return i.done;
+      });
+
+      filtered.forEach(item=>{
+        const li = document.createElement('li');
+        li.className = 'item' + (item.done? ' completed':'');
+        li.draggable = true;
+        li.dataset.id = item.id;
+
+        li.innerHTML = `
+          <input type="checkbox" class="chk" ${item.done? 'checked':''} aria-label="完成">
+          <div class="text">
+            <input class="editable" value="${escapeHtml(item.text)}" />
+          </div>
+          <div class="meta">
+            <span class="time">${new Date(item.createdAt).toLocaleString()}</span>
+            <button class="icon-btn btn-delete" title="删除">✕</button>
+          </div>
+        `;
+
+        const chk = li.querySelector('.chk');
+        chk.addEventListener('change', ()=>{
+          toggleDone(item.id);
+        });
+
+        const editInput = li.querySelector('.editable');
+        editInput.addEventListener('change', (e)=>{
+          updateText(item.id, e.target.value);
+        });
+        editInput.addEventListener('keydown', (e)=>{
+          if(e.key === 'Enter') e.target.blur();
+        });
+
+        li.querySelector('.btn-delete').addEventListener('click', ()=>{
+          removeItem(item.id);
+        });
+
+        li.addEventListener('dragstart', (e)=>{
+          e.dataTransfer.setData('text/plain', item.id);
+          li.style.opacity = '0.4';
+        });
+        li.addEventListener('dragend', ()=>{ li.style.opacity=''; });
+        li.addEventListener('dragover', (e)=>{ e.preventDefault(); });
+        li.addEventListener('drop', (e)=>{
+          e.preventDefault();
+          const draggedId = e.dataTransfer.getData('text/plain');
+          if(draggedId && draggedId !== item.id){
+            reorder(draggedId, item.id);
+          }
+        });
+
+        listEl.appendChild(li);
+      });
+
+      updateCounts();
+    }
+
+    function escapeHtml(str){ return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+
+    function addItem(text){
+      if(!text || !text.trim()) return;
+      items.unshift({id:Date.now().toString(), text:text.trim(), done:false, createdAt:Date.now()});
+      save(); render();
+    }
+    function removeItem(id){ items = items.filter(i=>i.id!==id); save(); render(); }
+    function toggleDone(id){
+      const it = items.find(i=>i.id===id); if(!it) return; it.done = !it.done; save(); render();
+    }
+    function updateText(id, newText){ const it = items.find(i=>i.id===id); if(!it) return; it.text = newText; save(); render(); }
+    function reorder(draggedId, targetId){
+      const fromIndex = items.findIndex(i=>i.id===draggedId);
+      const toIndex = items.findIndex(i=>i.id===targetId);
+      if(fromIndex<0||toIndex<0) return;
+      const [moved] = items.splice(fromIndex,1);
+      items.splice(toIndex,0,moved);
+      save(); render();
+    }
+    function clearAll(){ if(confirm('确定清空所有条目吗？')){ items = []; save(); render(); }}
+    function clearCompleted(){ items = items.filter(i=>!i.done); save(); render(); }
+
+    function updateCounts(){
+      const total = items.length; const done = items.filter(i=>i.done).length;
+      totalCountEl.textContent = total; doneCountEl.textContent = done;
+    }
+
+    addBtn.addEventListener('click', ()=>{ addItem(newInput.value); newInput.value=''; newInput.focus(); });
+    newInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ addItem(newInput.value); newInput.value=''; } });
+    clearAllBtn.addEventListener('click', clearAll);
+    clearCompletedBtn.addEventListener('click', ()=>{ if(confirm('清除所有已完成项？')) clearCompleted(); });
+
+    filters.forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        filters.forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter;
+        render();
+      });
+    });
+
+    load(); render();
+  </script>
+</body>
+</html>
